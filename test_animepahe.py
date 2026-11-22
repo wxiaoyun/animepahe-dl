@@ -1,6 +1,13 @@
 """Self-check for the parsing and selection logic. Run: .venv/bin/python test_animepahe.py"""
 from animepahe import (decode_kwik, episode_label, folder_name, parse_browser, parse_episodes, parse_links,
-                       pick_link)
+                       parse_streams, pick_link, unpack_packer)
+
+BUTTONS = '''
+<button type="button" data-src="https://kwik.cx/e/s360" data-fansub="SEV" data-resolution="360" data-audio="jpn" data-av1="0" class="dropdown-item">
+<button type="button" data-src="https://kwik.cx/e/s1080" data-fansub="SEV" data-resolution="1080" data-audio="jpn" data-av1="0" class="dropdown-item active">
+<button type="button" data-src="https://kwik.cx/e/av1" data-fansub="SEV" data-resolution="1080" data-audio="jpn" data-av1="1" class="dropdown-item">
+<button type="button" data-src="https://kwik.cx/e/e720" data-fansub="SEV" data-resolution="720" data-audio="eng" data-av1="0" class="dropdown-item">
+'''
 
 PLAY = '''
 <a href="https://pahe.win/aaaaa" target="_blank" class="dropdown-item">SEV &middot; 360p (44MB) <span class="badge badge-primary">BD</span></a>
@@ -36,6 +43,17 @@ def test_parse_and_pick():
     assert pick_link(links, 'jpn', 720)['url'].endswith('aaaaa')      # next lower when 720 is missing
     assert pick_link(links, 'eng')['url'].endswith('ddddd')
     assert pick_link(links, 'eng', 480) is None                       # never switches audio
+
+
+def test_streams_and_packer():
+    streams = parse_streams(BUTTONS)
+    assert [s['url'][-5:] for s in streams] == ['/s360', 's1080', '/e720']   # AV1 dropped
+    assert pick_link(streams, 'jpn')['url'].endswith('s1080')
+    assert pick_link(streams, 'eng', 1080)['url'].endswith('e720')
+    # 12 words, base 10: tokens "0".."b" exercise multi-digit lookups ("10", "11")
+    words = 'var|x|y|z|a|b|c|d|e|f|source|m3u8'.split('|')
+    html = "eval(function(p,a,c,k,e,d){...}('0 10=\\\\'https://h/s.11\\\\';',10,12,'%s'.split('|'),0,{}))" % '|'.join(words)
+    assert unpack_packer(html) == "var source=\\\\'https://h/s.m3u8\\\\';"
 
 
 def test_parse_episodes():

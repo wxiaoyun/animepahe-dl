@@ -16,7 +16,9 @@ from pathlib import Path
 from urllib.parse import quote
 
 from curl_cffi import requests
+from yt_dlp import YoutubeDL
 from yt_dlp.cookies import extract_cookies_from_browser
+from yt_dlp.networking.impersonate import ImpersonateTarget
 
 HOST = 'https://animepahe.pw'
 COOKIE_DOMAINS = ('animepahe', 'kwik', 'pahe.win')
@@ -54,6 +56,36 @@ def parse_links(play_html):
             'audio': audio[1].lower() if audio else 'jpn',
         })
     return links
+
+
+def parse_streams(play_html):
+    """Stream buttons on a play page (non-AV1), in the same shape as parse_links."""
+    streams = []
+    for tag in re.findall(r'<button[^>]*data-src="https://kwik\.\w+/e/[^>]*>', play_html):
+        attr = dict(re.findall(r'data-([\w-]+)="([^"]*)"', tag))
+        if attr.get('av1') == '1':
+            continue
+        streams.append({
+            'url': attr['src'],
+            'fansub': attr.get('fansub', ''),
+            'resolution': int(attr['resolution']) if attr.get('resolution', '').isdigit() else 0,
+            'audio': attr.get('audio', 'jpn').lower(),
+        })
+    return streams
+
+
+def unpack_packer(html):
+    """Decode Dean Edwards' p.a.c.k.e.r. JS by word substitution, without running it."""
+    m = re.search(r"\}\('(.*)',(\d+),(\d+),'(.*?)'\.split\('\|'\)", html, re.S)
+    if not m:
+        raise ValueError('page has no packed script')
+    payload, base, count, words = m[1], int(m[2]), int(m[3]), m[4].split('|')
+    digits = '0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ'
+
+    def encode(n):
+        return (encode(n // base) if n >= base else '') + digits[n % base]
+    table = {encode(i): words[i] or encode(i) for i in range(count)}
+    return re.sub(r'\b\w+\b', lambda w: table.get(w[0], w[0]), payload)
 
 
 def pick_link(links, audio, max_resolution=None):
@@ -113,13 +145,19 @@ def is_challenge(r):
 # ---------- network ----------
 
 class _YtdlpLogger:
+    """Routes yt-dlp output into our log. yt-dlp warns once per undecryptable cookie (hundreds), and
+    reports retries it recovers from as errors, so warnings go to debug and errors to warning. Real
+    failures are logged by the caller."""
+
+    def __init__(self, stage):
+        self.stage = stage
+
     def debug(self, msg, *_, **__):
-        log.debug('stage=cookies %s', msg)
-    # yt-dlp warns once per undecryptable cookie (hundreds). Client.load_cookies warns once instead.
+        log.debug('stage=%s %s', self.stage, msg)
     info = warning = debug
 
     def error(self, msg, *_, **__):
-        log.error('stage=cookies %s', msg)
+        log.warning('stage=%s %s', self.stage, msg)
 
 
 class Client:
@@ -129,19 +167,21 @@ class Client:
         self.ua, self.browser = ua, browser
         self.local = threading.local()
         self.lock = threading.Lock()
+        # ponytail: one stream download at a time globally, the stream CDN answers 429 to concurrency.
+        self.stream_lock = threading.Lock()
         self.gen = 0
         self.dead = False
         self.load_cookies()
 
-    def load_cookies(self):
+    def load_cookies(self, level=logging.INFO):
         name, profile, keyring = parse_browser(self.browser)
-        log.info('stage=cookies target=%s', self.browser)
+        log.log(level, 'stage=cookies target=%s', self.browser)
         try:
-            jar = extract_cookies_from_browser(name, profile, logger=_YtdlpLogger(), keyring=keyring)
+            jar = extract_cookies_from_browser(name, profile, logger=_YtdlpLogger('cookies'), keyring=keyring)
         except Exception as e:
             raise Fatal(f'stage=cookies browser={self.browser} error={e}') from e
         self.cookies = [(c.domain, c.name, c.value) for c in jar if any(d in c.domain for d in COOKIE_DOMAINS)]
-        log.info('stage=cookies status=loaded count=%d', len(self.cookies))
+        log.log(level, 'stage=cookies status=loaded count=%d', len(self.cookies))
         if not any(n == 'cf_clearance' and 'animepahe' in d for d, n, _ in self.cookies):
             # yt-dlp skips cookies it cannot decrypt (e.g. keyring unavailable) without failing.
             log.warning('stage=cookies status=no_cf_clearance target=%s hint="open %s in that browser, '
@@ -180,6 +220,7 @@ class Client:
                 raise Fatal(f'stage=cloudflare target={url} status=blocked, open it in your browser and re-run')
             print(f'\nCloudflare blocked: {url}\n'
                   f'Open that link in your browser ({self.browser}) until the page loads, then press Enter.\n'
+                  f'(The browser can take about 30 s to save the new cookie, the script waits for it.)\n'
                   f'If this keeps happening, set "ua" in {CONFIG} to that browser\'s user agent.',
                   file=sys.stderr)
             try:
@@ -187,7 +228,14 @@ class Client:
             except EOFError:
                 self.dead = True
                 raise Fatal('stage=cloudflare status=aborted')
-            self.load_cookies()
+            # Chromium writes cookies to disk in batches (about 20-30 s after the page loads), so poll.
+            old, deadline = set(self.cookies), time.monotonic() + 60
+            log.info('stage=cloudflare status=waiting_for_new_cookies timeout=60s')
+            self.load_cookies(logging.DEBUG)
+            while set(self.cookies) == old and time.monotonic() < deadline:
+                time.sleep(3)
+                self.load_cookies(logging.DEBUG)
+            log.info('stage=cloudflare status=%s', 'cookies_changed' if set(self.cookies) != old else 'timeout')
             self.gen += 1
 
     def get_json(self, url, stage):
@@ -228,6 +276,35 @@ class Client:
         if r.status_code != 302 or 'location' not in r.headers:
             raise RuntimeError(f'stage=kwik_post target={action} api_status={r.status_code} error=no_redirect')
         return r.headers['location'], kwik
+
+    def stream_playlist(self, kwik_embed):
+        """kwik /e/ embed link -> HLS playlist URL."""
+        html = self.request('GET', kwik_embed, 'kwik_embed', headers={'Referer': f'{HOST}/'}).text
+        m = re.search(r"https://[^'\"\\\s]+\.m3u8", unpack_packer(html))
+        if not m:
+            raise RuntimeError(f'stage=kwik_embed target={kwik_embed} error=no_m3u8')
+        return m[0]
+
+    def download_stream(self, playlist, dest, progress):
+        """Fetch an HLS playlist into dest with yt-dlp. Slow, and serialized across threads."""
+        seen = {'bytes': 0}
+
+        def hook(d):
+            now = d.get('downloaded_bytes') or 0
+            progress.add(max(now - seen['bytes'], 0))
+            seen['bytes'] = now
+
+        opts = {
+            'outtmpl': str(dest), 'quiet': True, 'noprogress': True, 'logger': _YtdlpLogger('stream_download'),
+            'http_headers': {'Referer': 'https://kwik.cx/', 'User-Agent': self.ua},
+            'impersonate': ImpersonateTarget.from_str('chrome'), 'progress_hooks': [hook],
+        }
+        with self.stream_lock:
+            log.info('stage=stream_download method=GET target=%s', playlist)
+            with YoutubeDL(opts) as ydl:
+                if ydl.download([playlist]):
+                    raise RuntimeError(f'stage=stream_download target={playlist} error=yt-dlp_failed')
+        return seen['bytes']
 
     def download(self, url, referer, dest, progress):
         """Stream url into dest, resuming dest.part if present. Returns bytes written this run."""
@@ -311,7 +388,26 @@ def load_config():
     return cfg['ua'], cfg.get('browser', 'chrome')
 
 
+def _timed(label, method, link, dest, progress, fetch):
+    """Run fetch() with start and done log lines and the active-download count."""
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    log.info('episode=%s status=start method=%s audio=%s resolution=%dp fansub=%s',
+             label, method, link['audio'], link['resolution'], link['fansub'])
+    with progress.lock:
+        progress.active += 1
+    t0 = time.monotonic()
+    try:
+        n = fetch()
+    finally:
+        with progress.lock:
+            progress.active -= 1
+    dt = max(time.monotonic() - t0, 1e-6)
+    log.info('episode=%s status=done method=%s size=%.0fMB time=%.1fs speed=%.0fMbit/s target=%s',
+             label, method, dest.stat().st_size / 1e6, dt, n * 8 / 1e6 / dt, dest)
+
+
 def run_episode(client, ep, anime_id, out_dir, width, args, progress):
+    """Direct download first. Stream when no direct link matches or the direct path fails (not Cloudflare)."""
     label = episode_label(float(ep['episode']), width)
     dest = out_dir / f'{label}.mp4'
     if dest.exists() and not args.links:
@@ -321,33 +417,46 @@ def run_episode(client, ep, anime_id, out_dir, width, args, progress):
     try:
         play = client.request('GET', f'{HOST}/play/{anime_id}/{ep["session"]}', stage).text
         stage = 'select'
-        links = parse_links(play)
+        links, streams = parse_links(play), parse_streams(play)
         link = pick_link(links, args.audio, args.resolution)
-        if not link:
-            have = sorted({f'{l["audio"]}/{l["resolution"]}p' for l in links})
+        if link:
+            try:
+                stage = 'resolve'
+                url, referer = client.resolve(link['url'])
+                if args.links:
+                    print(url, flush=True)
+                    return True
+                stage = 'download'
+                _timed(label, 'direct', link, dest, progress, lambda: client.download(url, referer, dest, progress))
+                return True
+            except Fatal:
+                raise
+            except Exception as e:
+                log.warning('episode=%s stage=%s status=direct_failed error=%s fallback=stream', label, stage, e)
+
+        stage = 'select'
+        stream = pick_link(streams, args.audio, args.resolution)
+        if not stream:
+            have = sorted({f'{l["audio"]}/{l["resolution"]}p' for l in links + streams})
             log.warning('episode=%s stage=select status=no_match audio=%s resolution=%s available=%s',
                         label, args.audio, args.resolution or 'highest', ','.join(have) or 'none')
             return False
-        stage = 'resolve'
-        url, referer = client.resolve(link['url'])
+        if not link:
+            log.warning('episode=%s stage=select status=no_direct_link fallback=stream', label)
+        stage = 'stream_resolve'
+        playlist = client.stream_playlist(stream['url'])
         if args.links:
-            print(url, flush=True)
+            print(playlist, flush=True)
             return True
-        stage = 'download'
-        out_dir.mkdir(parents=True, exist_ok=True)
-        log.info('episode=%s status=start audio=%s resolution=%dp fansub=%s',
-                 label, link['audio'], link['resolution'], link['fansub'])
-        with progress.lock:
-            progress.active += 1
-        t0 = time.monotonic()
-        try:
-            n = client.download(url, referer, dest, progress)
-        finally:
-            with progress.lock:
-                progress.active -= 1
-        dt = max(time.monotonic() - t0, 1e-6)
-        log.info('episode=%s status=done size=%.0fMB time=%.1fs speed=%.0fMbit/s target=%s',
-                 label, dest.stat().st_size / 1e6, dt, n * 8 / 1e6 / dt, dest)
+        stage = 'stream_download'
+        # Own file name: yt-dlp's partial files must not mix with a direct download's .part.
+        tmp = dest.with_name(f'{label}.stream.mp4')
+
+        def fetch():
+            n = client.download_stream(playlist, tmp, progress)
+            tmp.rename(dest)
+            return n
+        _timed(label, 'stream', stream, dest, progress, fetch)
         return True
     except Fatal:
         raise

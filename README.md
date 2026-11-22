@@ -2,14 +2,14 @@
 
 Download anime from [animepahe](https://animepahe.pw) in the terminal, several episodes at once, at full line speed.
 
-It uses animepahe's direct download links (the same single MP4 file the site's download button gives you) rather than the in-browser stream, which is split into many small pieces and rate limited. Cloudflare cookies are read straight from your browser, so there is nothing to copy by hand.
+It uses animepahe's direct download links (the same single MP4 file the site's download button gives you) rather than the in-browser stream, which is split into many small pieces and rate limited. If an episode has no matching direct link, or the direct download fails, it falls back to the stream, which is much slower and runs one episode at a time. Cloudflare cookies are read straight from your browser, so there is nothing to copy by hand.
 
 Forked from [KevCui/animepahe-dl](https://github.com/KevCui/animepahe-dl) and rewritten in Python.
 
 ## Requirements
 
 - Python 3.10+
-- [curl_cffi](https://github.com/lexiforest/curl_cffi) for browser-like HTTP, and [yt-dlp](https://github.com/yt-dlp/yt-dlp), used only to read your browser's cookies:
+- [curl_cffi](https://github.com/lexiforest/curl_cffi) for browser-like HTTP, and [yt-dlp](https://github.com/yt-dlp/yt-dlp) to read your browser's cookies and to download the stream fallback:
 
   ```sh
   python3 -m venv .venv
@@ -17,6 +17,7 @@ Forked from [KevCui/animepahe-dl](https://github.com/KevCui/animepahe-dl) and re
   ```
 
 - Optional: [fzf](https://github.com/junegunn/fzf) to pick between search results. Without it you get a numbered list.
+- Optional: [ffmpeg](https://ffmpeg.org), used by yt-dlp to turn a stream fallback download into a proper MP4 container.
 
 ## Setup
 
@@ -48,7 +49,7 @@ Forked from [KevCui/animepahe-dl](https://github.com/KevCui/animepahe-dl) and re
 | `-r RES` | maximum resolution such as `720`. Default is the highest. If that resolution is missing, the next lower one is used |
 | `-j JOBS` | episodes downloaded at once, default 4 |
 | `-o DIR` | output directory, default current directory |
-| `--links` | print the direct MP4 links instead of downloading |
+| `--links` | print the direct MP4 links (or stream playlist links for fallbacks) instead of downloading |
 | `-d` | debug logging |
 
 Files are saved as `<DIR>/<Title>/<episode>.mp4`, with `/` and whitespace in the title replaced by `_` and the episode number zero-padded (`01.mp4`, `12.5.mp4`). Finished episodes are skipped on the next run, and interrupted ones resume from their `.part` file.
@@ -68,7 +69,9 @@ Files are saved as `<DIR>/<Title>/<episode>.mp4`, with `/` and whitespace in the
 
 ### When Cloudflare blocks a request
 
-The script pauses and prints the exact link that was blocked. Open it in the browser named in `config.json`, wait for the page to load, then press Enter. The script re-reads the cookies and carries on. If it keeps happening, your `ua` probably no longer matches the browser.
+The script pauses and prints the exact link that was blocked. Open it in the browser named in `config.json`, wait for the page to load, then press Enter. The browser can take around 30 seconds to save the new cookie, and the script waits up to a minute for it before carrying on. If it keeps happening, your `ua` probably no longer matches the browser.
+
+A Cloudflare block never triggers the stream fallback, since it would block every episode the same way.
 
 ## Tests
 
