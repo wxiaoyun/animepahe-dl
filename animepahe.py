@@ -385,7 +385,7 @@ def load_config():
         raise Fatal(f'stage=config target={CONFIG} error={e}. See README for the format.') from e
     if not cfg.get('ua'):
         raise Fatal(f'stage=config target={CONFIG} error="ua" is missing')
-    return cfg['ua'], cfg.get('browser', 'chrome')
+    return cfg
 
 
 def _timed(label, method, link, dest, progress, fetch):
@@ -473,7 +473,7 @@ def main(argv=None):
     p.add_argument('-a', '--audio', default='jpn', choices=['jpn', 'eng'], help='audio (default: jpn)')
     p.add_argument('-r', '--resolution', type=int, help='max resolution, e.g. 720 (default: highest)')
     p.add_argument('-j', '--jobs', type=int, default=4, help='episodes downloaded at once (default: 4)')
-    p.add_argument('-o', '--out', default='.', help='output directory (default: .)')
+    p.add_argument('-o', '--out', help='output directory (default: "out_dir" in config.json, else .)')
     p.add_argument('--links', action='store_true', help='print direct MP4 links instead of downloading')
     p.add_argument('-d', '--debug', action='store_true', help='debug logging')
     args = p.parse_args(argv)
@@ -483,7 +483,8 @@ def main(argv=None):
     logging.basicConfig(level=logging.DEBUG if args.debug else logging.INFO, stream=sys.stderr,
                         format='%(asctime)s %(levelname)s %(message)s', datefmt='%H:%M:%S')
     try:
-        client = Client(*load_config())
+        cfg = load_config()
+        client = Client(cfg['ua'], cfg.get('browser', 'chrome'))
         if args.id:
             anime_id, title = args.id, client.title(args.id)
         else:
@@ -510,7 +511,7 @@ def main(argv=None):
             raise Fatal('stage=episodes status=nothing_selected')
 
         width = max(2, len(str(int(max(by_num)))))
-        out_dir = Path(args.out) / folder_name(title)
+        out_dir = Path(args.out or cfg.get('out_dir') or '.').expanduser() / folder_name(title)
         progress = Progress()
         with ThreadPoolExecutor(max(1, args.jobs)) as pool:
             futures = [pool.submit(run_episode, client, by_num[n], anime_id, out_dir, width, args, progress)
