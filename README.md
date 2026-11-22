@@ -38,8 +38,16 @@ Forked from [KevCui/animepahe-dl](https://github.com/KevCui/animepahe-dl) and re
 
 ## Usage
 
+The `animepahe` wrapper runs the script with the repo's `.venv` from any directory, so you can put it on your `PATH`:
+
+```sh
+ln -s "$PWD/animepahe" ~/.local/bin/animepahe
 ```
-.venv/bin/python animepahe.py [query] [--id ID] [-e EPISODES] [-a {jpn,eng}] [-r RES] [-j JOBS] [-o DIR] [--links] [-d]
+
+Downloads go to `-o`, else `out_dir` from `config.json`, else the directory you run it from.
+
+```
+animepahe [query] [--id ID] [-e EPISODES] [-a {jpn,eng}] [-r RES] [-j JOBS] [-o DIR] [--links] [-d]
 ```
 
 | Option | Meaning |
@@ -54,19 +62,19 @@ Forked from [KevCui/animepahe-dl](https://github.com/KevCui/animepahe-dl) and re
 | `--links` | print the direct MP4 links (or stream playlist links for fallbacks) instead of downloading |
 | `-d` | debug logging |
 
-Files are saved as `<DIR>/<Title>/<episode>.mp4`, with `/` and whitespace in the title replaced by `_` and the episode number zero-padded (`01.mp4`, `12.5.mp4`). Finished episodes are skipped on the next run, and interrupted ones resume from their `.part` file.
+Files are saved as `<DIR>/<Title>/<episode>.mp4`, with whitespace and `\ / : * ? " < > |` in the title replaced by `_` (so it also works on NTFS and exFAT drives) and the episode number zero-padded (`01.mp4`, `12.5.mp4`). Finished episodes are skipped on the next run, and interrupted ones resume from their `.part` file.
 
 ### Examples
 
 ```sh
 # search, pick with fzf, then choose episodes interactively
-.venv/bin/python animepahe.py frieren
+animepahe frieren
 
 # all episodes in English audio at most 720p, 8 at a time
-.venv/bin/python animepahe.py frieren -e '*' -a eng -r 720 -j 8
+animepahe frieren -e '*' -a eng -r 720 -j 8
 
 # by Anime ID, only print links
-.venv/bin/python animepahe.py --id a2295fa7-8eaa-d274-a475-6a06be0cfa5a -e 1-3 --links
+animepahe --id a2295fa7-8eaa-d274-a475-6a06be0cfa5a -e 1-3 --links
 ```
 
 ### When Cloudflare blocks a request

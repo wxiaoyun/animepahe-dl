@@ -68,8 +68,9 @@ def test_labels_and_names():
     assert episode_label(1.0, 2) == '01'
     assert episode_label(12.5, 2) == '12.5'
     assert episode_label(7.0, 3) == '007'
-    assert folder_name("Frieren: Beyond Journey's End") == "Frieren:_Beyond_Journey's_End"
+    assert folder_name("Frieren: Beyond Journey's End") == "Frieren__Beyond_Journey's_End"
     assert folder_name('A/B  C') == 'A_B__C'
+    assert folder_name('Re:Zero - Why? <a|b> "c" *d\\e.') == 'Re_Zero_-_Why___a_b___c___d_e'
 
 
 def test_parse_browser():

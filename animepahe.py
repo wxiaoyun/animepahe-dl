@@ -134,7 +134,9 @@ def episode_label(num, width):
 
 
 def folder_name(title):
-    return re.sub(r'[/\s]', '_', title)
+    """Title as a folder name that also works on NTFS/exFAT drives: whitespace and \\/:*?"<>| become _,
+    and trailing dots (which Windows filesystems reject) are dropped."""
+    return re.sub(r'[\s\\/:*?"<>|]', '_', title).rstrip('.')
 
 
 def is_challenge(r):
@@ -413,8 +415,13 @@ def run_episode(client, ep, anime_id, out_dir, width, args, progress):
     if dest.exists() and not args.links:
         log.info('episode=%s status=skipped reason=exists target=%s', label, dest)
         return True
-    stage = 'play'
+    stage = 'mkdir'
     try:
+        if not args.links:
+            # Before any download attempt, so a local error (e.g. a name the filesystem rejects) is not
+            # mistaken for a direct download failure and retried through the stream.
+            out_dir.mkdir(parents=True, exist_ok=True)
+        stage = 'play'
         play = client.request('GET', f'{HOST}/play/{anime_id}/{ep["session"]}', stage).text
         stage = 'select'
         links, streams = parse_links(play), parse_streams(play)

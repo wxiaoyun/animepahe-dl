@@ -1,0 +1,13 @@
+#!/bin/sh
+# Run animepahe.py with the repo's virtualenv from anywhere, including through a symlink
+# (e.g. ln -s "$PWD/animepahe" ~/.local/bin/animepahe). The working directory is left
+# unchanged, so the default output directory is still wherever you run it from.
+set -eu
+dir=$(dirname "$(realpath "$0")")
+py="$dir/.venv/bin/python"
+if [ ! -x "$py" ]; then
+    echo "animepahe: $py not found. Set it up with:" >&2
+    echo "  python3 -m venv '$dir/.venv' && '$dir/.venv/bin/pip' install -r '$dir/requirements.txt'" >&2
+    exit 1
+fi
+exec "$py" "$dir/animepahe.py" "$@"
