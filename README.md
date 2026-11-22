@@ -4,7 +4,7 @@ Download anime from [animepahe](https://animepahe.pw) in the terminal, several e
 
 It uses animepahe's direct download links (the same single MP4 file the site's download button gives you) rather than the in-browser stream, which is split into many small pieces and rate limited. If an episode has no matching direct link, or the direct download fails, it falls back to the stream, which is much slower and runs one episode at a time. Cloudflare cookies are read straight from your browser, so there is nothing to copy by hand.
 
-Forked from [KevCui/animepahe-dl](https://github.com/KevCui/animepahe-dl) and rewritten in Python.
+Forked from [KevCui/animepahe-dl](https://github.com/KevCui/animepahe-dl) by Kevin Cui and rewritten in Python.
 
 ## Requirements
 
@@ -88,6 +88,12 @@ A Cloudflare block never triggers the stream fallback, since it would block ever
 ```sh
 .venv/bin/python test_animepahe.py
 ```
+
+## License and credits
+
+MIT, see [LICENSE](LICENSE).
+
+This project started as a fork of [animepahe-dl](https://github.com/KevCui/animepahe-dl) by Kevin Cui, a bash script released under the [WTFPL v2](http://www.wtfpl.net/). Thanks to Kevin for the original tool, whose approach to animepahe's API and kwik links this rewrite builds on.
 
 ## Disclaimer
 
