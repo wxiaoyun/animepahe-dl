@@ -1,12 +1,9 @@
+config.json
+.venv/
+__pycache__/
+*.mp4
+*.part
+# left over from the old bash version
 anime.list
 .source.json
-*/.source.json
-*/*.mp4
-node_modules
-package-lock.json
-.editorconfig
-.*
-config.json
-bin/*.json
 *.ytdl
-*.part

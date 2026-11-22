@@ -1,172 +1,81 @@
 # animepahe-dl
 
-> Download anime videos from [animepahe](https://animepahe.pw/) in terminal
+Download anime from [animepahe](https://animepahe.pw) in the terminal, several episodes at once, at full line speed.
 
-## Table of Contents
+It uses animepahe's direct download links (the same single MP4 file the site's download button gives you) rather than the in-browser stream, which is split into many small pieces and rate limited. Cloudflare cookies are read straight from your browser, so there is nothing to copy by hand.
 
-- [Dependency](#dependency)
-- [How to use](#how-to-use)
-  - [Example](#example)
-- [Disclaimer](#disclaimer)
+Forked from [KevCui/animepahe-dl](https://github.com/KevCui/animepahe-dl) and rewritten in Python.
 
-## Dependency
+## Requirements
 
-- [jq](https://stedolan.github.io/jq/)
-- [fzf](https://github.com/junegunn/fzf)
-- [yt-dlp with curl_cffi](https://github.com/yt-dlp/yt-dlp#impersonation): `pip install "yt-dlp[default,curl-cffi]"`
-- [curl-impersonate](https://github.com/lexiforest/curl-impersonate)
+- Python 3.10+
+- [curl_cffi](https://github.com/lexiforest/curl_cffi) for browser-like HTTP, and [yt-dlp](https://github.com/yt-dlp/yt-dlp), used only to read your browser's cookies:
 
-## How to use
+  ```sh
+  python3 -m venv .venv
+  .venv/bin/pip install -r requirements.txt
+  ```
 
-- Configuration
+- Optional: [fzf](https://github.com/junegunn/fzf) to pick between search results. Without it you get a numbered list.
 
-1. Open browser, visit https://animepahe.pw, solve Cloudflare
-2. Get `cf_clearance` cookie value, and `user-agent` value from your browser
-3. Edit `config.json`, put your `cf_clearance` and `user-agent`, like following:
+## Setup
 
-```json
-{
-  "cf": "YOUR_CF_CLEARANCE",
-  "ua": "YOUR_USER_AGENT"
-}
+1. Open https://animepahe.pw in your browser and let the Cloudflare check pass.
+2. Create `config.json` next to `animepahe.py`:
+
+   ```json
+   {
+     "ua": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/146.0.0.0 Safari/537.36",
+     "browser": "chrome"
+   }
+   ```
+
+   - `ua`: your browser's exact user agent (search "what is my user agent" in that browser). Cloudflare ties its cookie to it, so update it after browser updates.
+   - `browser`: where to read cookies from, in yt-dlp's `BROWSER[+KEYRING][:PROFILE]` format. Defaults to `chrome`. Supported: `brave`, `chrome`, `chromium`, `edge`, `firefox`, `opera`, `safari`, `vivaldi`, `whale`. A Chromium fork not on that list works through its profile directory, for example `chromium:~/.config/ardia`.
+
+## Usage
+
+```
+.venv/bin/python animepahe.py [query] [--id ID] [-e EPISODES] [-a {jpn,eng}] [-r RES] [-j JOBS] [-o DIR] [--links] [-d]
 ```
 
-- Usage
+| Option | Meaning |
+|---|---|
+| `query` | anime title to search for |
+| `--id ID` | Anime ID from the animepahe URL (`/anime/<ID>`), skips the search |
+| `-e EPISODES` | `1`, `1,3-5`, or `*` for all. Asks if omitted |
+| `-a {jpn,eng}` | audio, default `jpn`. Episodes without it are skipped, never swapped for the other audio |
+| `-r RES` | maximum resolution such as `720`. Default is the highest. If that resolution is missing, the next lower one is used |
+| `-j JOBS` | episodes downloaded at once, default 4 |
+| `-o DIR` | output directory, default current directory |
+| `--links` | print the direct MP4 links instead of downloading |
+| `-d` | debug logging |
 
-```
-Usage:
-  ./animepahe-dl.sh [-a <anime name>] [-s <anime_slug>] [-e <episode_num1,num2,num3-num4...>] [-r <resolution>] [-l] [-d]
+Files are saved as `<DIR>/<Title>/<episode>.mp4`, with `/` and whitespace in the title replaced by `_` and the episode number zero-padded (`01.mp4`, `12.5.mp4`). Finished episodes are skipped on the next run, and interrupted ones resume from their `.part` file.
 
-Options:
-  -a <name>               anime name
-  -s <slug>               anime slug/uuid, can be found in $_ANIME_LIST_FILE
-                          ignored when "-a" is enabled
-  -e <num1,num3-num4...>  optional, episode number to download
-                          multiple episode numbers seperated by ","
-                          episode range using "-"
-                          all episodes using "*"
-  -r <resolution>         optional, specify resolution: "1080", "720"...
-                          by default, the highest resolution is selected
-  -o <language>           optional, specify audio language: "eng", "jpn"...
-  -l                      optional, show m3u8 playlist link without downloading videos
-  -d                      enable debug mode
-  -h | --help             display this help message
-```
+### Examples
 
-### Example
+```sh
+# search, pick with fzf, then choose episodes interactively
+.venv/bin/python animepahe.py frieren
 
-- Simply run script to search anime name and select the right one in `fzf`:
+# all episodes in English audio at most 720p, 8 at a time
+.venv/bin/python animepahe.py frieren -e '*' -a eng -r 720 -j 8
 
-```bash
-$ ./animepahe-dl.sh
-<anime list in fzf>
-...
+# by Anime ID, only print links
+.venv/bin/python animepahe.py --id a2295fa7-8eaa-d274-a475-6a06be0cfa5a -e 1-3 --links
 ```
 
-- Search anime by its name:
+### When Cloudflare blocks a request
 
-```bash
-$ ./animepahe-dl.sh -a 'attack on titan'
-<anime list in fzf>
-```
+The script pauses and prints the exact link that was blocked. Open it in the browser named in `config.json`, wait for the page to load, then press Enter. The script re-reads the cookies and carries on. If it keeps happening, your `ua` probably no longer matches the browser.
 
-- By default, anime slug/uuid is stored in `./anime.list` file. Be aware that the value of anime slug/uuid often changes, not permanent. Download "One Punch Man" season 2 episode 3:
+## Tests
 
-```bash
-$ ./animepahe-dl.sh -s 308f5756-6715-e404-998d-92f16b9d9858 -e 3
-```
-
-- List "One Punch Man" season 2 all episodes:
-
-```bash
-$ ./animepahe-dl.sh -s 308f5756-6715-e404-998d-92f16b9d9858
-[1] E1 2019-04-09 18:45:38
-[2] E2 2019-04-16 17:54:48
-[3] E3 2019-04-23 17:51:20
-[4] E4 2019-04-30 17:51:37
-[5] E5 2019-05-07 17:55:53
-[6] E6 2019-05-14 17:52:04
-[7] E7 2019-05-21 17:54:21
-[8] E8 2019-05-28 22:51:16
-[9] E9 2019-06-11 17:48:50
-[10] E10 2019-06-18 17:50:25
-[11] E11 2019-06-25 17:59:38
-[12] E12 2019-07-02 18:01:11
-```
-
-- Support batch downloads: list "One Punch Man" season 2 episode 2, 5, 6, 7:
-
-```bash
-$ ./animepahe-dl.sh -s 308f5756-6715-e404-998d-92f16b9d9858 -e 2,5,6,7
-[INFO] Downloading Episode 2...
-...
-[INFO] Downloading Episode 5...
-...
-[INFO] Downloading Episode 6...
-...
-[INFO] Downloading Episode 7...
-...
-```
-
-OR using episode range:
-
-```bash
-$ ./animepahe-dl.sh -s 308f5756-6715-e404-998d-92f16b9d9858 -e 2,5-7
-[INFO] Downloading Episode 2...
-...
-[INFO] Downloading Episode 5...
-...
-[INFO] Downloading Episode 6...
-...
-[INFO] Downloading Episode 7...
-...
-```
-
-- Download all episodes using `*`:
-
-```bash
-$ ./animepahe-dl.sh -s 308f5756-6715-e404-998d-92f16b9d9858 -e '*'
-[INFO] Downloading Episode 1...
-...
-[INFO] Downloading Episode 2...
-...
-[INFO] Downloading Episode 3...
-...
-```
-
-- Specify video resolution:
-
-```bash
-$ ./animepahe-dl.sh -a jujutsu -e 5 -r 360
-[INFO] Select video resolution: 360
-[INFO] Downloading Episode 5...
-```
-
-- Specify audio language:
-
-```bash
-$ ./animepahe-dl.sh -a 'samurai 7' -e 1 -o eng
-[INFO] Select audio language: eng
-[INFO] Downloading Episode 1...
-```
-
-- Show only m3u8 playlist link, without downloading video file:
-
-```bash
-$ ./animepahe-dl.sh -s 308f5756-6715-e404-998d-92f16b9d9858 -e 5 -l
-...
-```
-
-It's useful to toss m3u8 into media player and stream:
-
-```bash
-$ mpv --http-header-fields="Referer: https://kwik.cx/" "$(./animepahe-dl.sh -s 308f5756-6715-e404-998d-92f16b9d9858 -e 5 -l)"
+```sh
+.venv/bin/python test_animepahe.py
 ```
 
 ## Disclaimer
 
 The purpose of this script is to download anime episodes in order to watch them later in case when Internet is not available. Please do NOT copy or distribute downloaded anime episodes to any third party. Watch them and delete them afterwards. Please use this script at your own responsibility.
-
----
-
-<a href="https://www.buymeacoffee.com/kevcui" target="_blank"><img src="https://cdn.buymeacoffee.com/buttons/v2/default-orange.png" alt="Buy Me A Coffee" height="60px" width="217px"></a>
