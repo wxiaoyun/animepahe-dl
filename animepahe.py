@@ -197,11 +197,13 @@ class Client:
             self.local.session, self.local.gen = s, self.gen
         return self.local.session
 
+    # ponytail: fixed backoff, about 2 min in total. Cloudflare's 429 here sends no Retry-After.
+    RATE_LIMIT_WAITS = (5, 15, 30, 60)
+
     def request(self, method, url, stage, **kw):
         for attempt in (1, 2):
             gen = self.gen
-            log.info('stage=%s method=%s target=%s', stage, method, url)
-            r = self._session().request(method, url, **kw)
+            r = self._rate_limited(method, url, stage, **kw)
             if not is_challenge(r):
                 if r.status_code >= 400:
                     raise RuntimeError(f'stage={stage} target={url} api_status={r.status_code}')
@@ -209,6 +211,18 @@ class Client:
             if attempt == 2:
                 raise Fatal(f'stage={stage} target={url} status=still_blocked_by_cloudflare')
             self._solve(url, gen)
+
+    def _rate_limited(self, method, url, stage, **kw):
+        """Send a request, waiting and retrying while the server answers 429 Too Many Requests."""
+        for wait in (*self.RATE_LIMIT_WAITS, None):
+            log.info('stage=%s method=%s target=%s', stage, method, url)
+            r = self._session().request(method, url, **kw)
+            if r.status_code != 429 or wait is None:
+                return r
+            retry_after = r.headers.get('retry-after', '')
+            wait = int(retry_after) if retry_after.isdigit() else wait
+            log.warning('stage=%s target=%s api_status=429 status=rate_limited retry_in=%ds', stage, url, wait)
+            time.sleep(wait)
 
     def _solve(self, url, gen):
         """Ask the user to pass the Cloudflare check in their browser, then reload cookies once for all threads."""
@@ -543,6 +557,11 @@ def main(argv=None):
         return 1 if failed else 0
     except Fatal as e:
         log.error('%s', e)
+        return 1
+    except Exception as e:
+        hint = ' hint="rate limited by animepahe, wait a few minutes or lower jobs"' if 'api_status=429' in str(e) else ''
+        log.error('stage=main status=failed error=%s%s', e, hint)
+        log.debug('traceback', exc_info=True)
         return 1
     except KeyboardInterrupt:
         return 130

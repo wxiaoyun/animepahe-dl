@@ -78,6 +78,36 @@ def test_parse_browser():
     assert parse_browser('chromium+kwallet6:/tmp/x') == ('chromium', '/tmp/x', 'KWALLET6')
 
 
+def test_rate_limit_backoff():
+    import animepahe
+
+    class Resp:
+        def __init__(self, code, headers=None):
+            self.status_code, self.headers, self.text = code, headers or {}, ''
+
+    def client(codes):
+        c = object.__new__(animepahe.Client)
+        c.gen, c.RATE_LIMIT_WAITS = 0, (5, 15)
+        queue = list(codes)
+        c._session = lambda: type('S', (), {'request': lambda self, *a, **k: queue.pop(0)})()
+        return c, queue
+
+    slept, real_sleep = [], animepahe.time.sleep
+    animepahe.time.sleep = slept.append
+    try:
+        c, _ = client([Resp(429, {'retry-after': '2'}), Resp(429), Resp(200)])
+        assert c.request('GET', 'u', 'search').status_code == 200
+        assert slept == [2, 15]                                  # Retry-After wins, then fixed backoff
+        c, _ = client([Resp(429)] * 3)
+        try:
+            c.request('GET', 'u', 'search')
+            raise AssertionError('expected RuntimeError')
+        except RuntimeError as e:
+            assert 'api_status=429' in str(e)                    # gives up after the last wait
+    finally:
+        animepahe.time.sleep = real_sleep
+
+
 if __name__ == '__main__':
     for name, fn in list(globals().items()):
         if name.startswith('test_'):
