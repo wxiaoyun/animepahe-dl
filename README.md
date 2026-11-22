@@ -28,12 +28,14 @@ Forked from [KevCui/animepahe-dl](https://github.com/KevCui/animepahe-dl) by Kev
    {
      "ua": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/146.0.0.0 Safari/537.36",
      "browser": "chrome",
-     "out_dir": "~/Videos/anime"
+     "out_dir": "~/Videos/anime",
+     "jobs": 4
    }
    ```
 
    - `ua`: your browser's exact user agent (search "what is my user agent" in that browser). Cloudflare ties its cookie to it, so update it after browser updates.
    - `out_dir` (optional): where downloads go when `-o` is not given. Defaults to the current directory.
+   - `jobs` (optional): how many episodes download at once when `-j` is not given. Defaults to 4.
    - `browser`: where to read cookies from, in yt-dlp's `BROWSER[+KEYRING][:PROFILE]` format. Defaults to `chrome`. Supported: `brave`, `chrome`, `chromium`, `edge`, `firefox`, `opera`, `safari`, `vivaldi`, `whale`. A Chromium fork not on that list works through its profile directory, for example `chromium:~/.config/ardia`.
 
 ## Usage
@@ -57,7 +59,7 @@ animepahe [query] [--id ID] [-e EPISODES] [-a {jpn,eng}] [-r RES] [-j JOBS] [-o 
 | `-e EPISODES` | `1`, `1,3-5`, or `*` for all. Asks if omitted |
 | `-a {jpn,eng}` | audio, default `jpn`. Episodes without it are skipped, never swapped for the other audio |
 | `-r RES` | maximum resolution such as `720`. Default is the highest. If that resolution is missing, the next lower one is used |
-| `-j JOBS` | episodes downloaded at once, default 4 |
+| `-j JOBS` | episodes downloaded at once, overrides `jobs` in `config.json`. Default is 4 |
 | `-o DIR` | output directory, overrides `out_dir` in `config.json`. Default is the current directory |
 | `--links` | print the direct MP4 links (or stream playlist links for fallbacks) instead of downloading |
 | `-d` | debug logging |

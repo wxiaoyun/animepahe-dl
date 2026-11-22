@@ -479,7 +479,7 @@ def main(argv=None):
     p.add_argument('-e', '--episodes', help='episodes, e.g. "1,3-5" or "*" (asks if omitted)')
     p.add_argument('-a', '--audio', default='jpn', choices=['jpn', 'eng'], help='audio (default: jpn)')
     p.add_argument('-r', '--resolution', type=int, help='max resolution, e.g. 720 (default: highest)')
-    p.add_argument('-j', '--jobs', type=int, default=4, help='episodes downloaded at once (default: 4)')
+    p.add_argument('-j', '--jobs', type=int, help='episodes downloaded at once (default: "jobs" in config.json, else 4)')
     p.add_argument('-o', '--out', help='output directory (default: "out_dir" in config.json, else .)')
     p.add_argument('--links', action='store_true', help='print direct MP4 links instead of downloading')
     p.add_argument('-d', '--debug', action='store_true', help='debug logging')
@@ -520,7 +520,11 @@ def main(argv=None):
         width = max(2, len(str(int(max(by_num)))))
         out_dir = Path(args.out or cfg.get('out_dir') or '.').expanduser() / folder_name(title)
         progress = Progress()
-        with ThreadPoolExecutor(max(1, args.jobs)) as pool:
+        jobs = args.jobs if args.jobs is not None else cfg.get('jobs', 4)
+        if not isinstance(jobs, int) or isinstance(jobs, bool) or jobs < 1:
+            raise Fatal(f'stage=config target={CONFIG} error="jobs" must be a positive integer, got {jobs!r}')
+        log.info('stage=config jobs=%d out_dir=%s', jobs, out_dir.parent)
+        with ThreadPoolExecutor(jobs) as pool:
             futures = [pool.submit(run_episode, client, by_num[n], anime_id, out_dir, width, args, progress)
                        for n in picked]
             try:
