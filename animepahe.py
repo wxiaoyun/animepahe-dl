@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Download anime episodes from animepahe using its direct download links."""
 import argparse
+import itertools
 import json
 import logging
 import os
@@ -339,9 +340,22 @@ class Client:
             if r.status_code == 200:
                 have = 0
             total = have + int(r.headers.get('content-length', 0))
+            chunks = r.iter_content()
+            head = b''
+            for chunk in chunks:
+                head += chunk
+                if len(head) >= 8:
+                    break
+            # A flagged IP can get a redirect to an ad page instead of the CDN. Check before writing,
+            # so a bogus page never becomes NN.mp4 (which later runs would skip as finished).
+            if not have and head[4:8] != b'ftyp':
+                ctype = r.headers.get('content-type', '')
+                raise RuntimeError(f'stage=download error=not_mp4 content_type={ctype!r} '
+                                   f'target={url.split("?")[0]} hint="redirect went somewhere other than '
+                                   f'the CDN, your IP may be flagged, try a VPN"')
             written = 0
             with open(part, 'ab' if have else 'wb') as f:
-                for chunk in r.iter_content():
+                for chunk in itertools.chain([head], chunks):
                     f.write(chunk)
                     written += len(chunk)
                     progress.add(len(chunk))

@@ -108,6 +108,47 @@ def test_rate_limit_backoff():
         animepahe.time.sleep = real_sleep
 
 
+def test_download_rejects_non_mp4():
+    import contextlib, os, tempfile
+    from pathlib import Path
+    import animepahe
+
+    class Resp:
+        def __init__(self, code, chunks, headers):
+            self.status_code, self._chunks, self.headers = code, chunks, headers
+
+        def iter_content(self):
+            return iter(self._chunks)
+
+    def client(code, chunks, headers):
+        c = object.__new__(animepahe.Client)
+        session = type('S', (), {'stream': lambda self, *a, **k: contextlib.nullcontext(Resp(code, chunks, headers))})
+        c._session = lambda: session()
+        return c
+
+    progress = type('P', (), {'add': lambda self, n: None})()
+    mp4 = b'\x00\x00\x00\x20ftypisom' + b'x' * 100
+    with tempfile.TemporaryDirectory() as d:
+        dest = Path(d) / '01.mp4'
+        html = b'<html>ads</html>'
+        try:
+            client(200, [html], {'content-type': 'text/html', 'content-length': str(len(html))}).download(
+                'https://ad.example/x', 'r', dest, progress)
+            raise AssertionError('expected RuntimeError')
+        except RuntimeError as e:
+            assert 'not_mp4' in str(e)
+        assert not dest.exists() and not dest.with_name('01.mp4.part').exists()   # nothing written
+
+        chunks = [mp4[:3], mp4[3:5], mp4[5:]]                                     # header split over chunks
+        client(200, chunks, {'content-length': str(len(mp4))}).download('u', 'r', dest, progress)
+        assert dest.read_bytes() == mp4
+
+        part = Path(d) / '02.mp4.part'
+        part.write_bytes(mp4[:50])                                                # resume: no header check
+        client(206, [mp4[50:]], {'content-length': str(len(mp4) - 50)}).download('u', 'r', Path(d) / '02.mp4', progress)
+        assert (Path(d) / '02.mp4').read_bytes() == mp4
+
+
 if __name__ == '__main__':
     for name, fn in list(globals().items()):
         if name.startswith('test_'):
