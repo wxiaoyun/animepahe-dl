@@ -166,8 +166,11 @@ class _YtdlpLogger:
 class Client:
     """HTTP with browser cookies. One curl session per thread, since curl handles are not thread safe."""
 
-    def __init__(self, ua, browser):
+    def __init__(self, ua, browser, request_interval=0.0):
         self.ua, self.browser = ua, browser
+        # Minimum gap between page requests across all threads. Bursts of page requests get an IP
+        # rate limited (and flagged) by animepahe. MP4 and stream transfers are not paced.
+        self.request_interval, self.pace_lock, self.next_slot = request_interval, threading.Lock(), 0.0
         self.local = threading.local()
         self.lock = threading.Lock()
         # ponytail: one stream download at a time globally, the stream CDN answers 429 to concurrency.
@@ -216,6 +219,7 @@ class Client:
     def _rate_limited(self, method, url, stage, **kw):
         """Send a request, waiting and retrying while the server answers 429 Too Many Requests."""
         for wait in (*self.RATE_LIMIT_WAITS, None):
+            self._pace()
             log.info('stage=%s method=%s target=%s', stage, method, url)
             r = self._session().request(method, url, **kw)
             if r.status_code != 429 or wait is None:
@@ -224,6 +228,15 @@ class Client:
             wait = int(retry_after) if retry_after.isdigit() else wait
             log.warning('stage=%s target=%s api_status=429 status=rate_limited retry_in=%ds', stage, url, wait)
             time.sleep(wait)
+
+    def _pace(self):
+        """Wait for this thread's turn: each page request reserves the next free slot, request_interval apart."""
+        with self.pace_lock:
+            now = time.monotonic()
+            slot = max(now, self.next_slot)
+            self.next_slot = slot + self.request_interval
+        if slot > now:
+            time.sleep(slot - now)
 
     def _solve(self, url, gen):
         """Ask the user to pass the Cloudflare check in their browser, then reload cookies once for all threads."""
@@ -519,7 +532,10 @@ def main(argv=None):
                         format='%(asctime)s %(levelname)s %(message)s', datefmt='%H:%M:%S')
     try:
         cfg = load_config()
-        client = Client(cfg['ua'], cfg.get('browser', 'chrome'))
+        interval = cfg.get('request_interval', 1.0)
+        if not isinstance(interval, (int, float)) or isinstance(interval, bool) or interval < 0:
+            raise Fatal(f'stage=config target={CONFIG} error="request_interval" must be a number >= 0, got {interval!r}')
+        client = Client(cfg['ua'], cfg.get('browser', 'chrome'), float(interval))
         if args.id:
             anime_id, title = args.id, client.title(args.id)
         else:
@@ -551,7 +567,7 @@ def main(argv=None):
         jobs = args.jobs if args.jobs is not None else cfg.get('jobs', 4)
         if not isinstance(jobs, int) or isinstance(jobs, bool) or jobs < 1:
             raise Fatal(f'stage=config target={CONFIG} error="jobs" must be a positive integer, got {jobs!r}')
-        log.info('stage=config jobs=%d out_dir=%s', jobs, out_dir.parent)
+        log.info('stage=config jobs=%d request_interval=%gs out_dir=%s', jobs, client.request_interval, out_dir.parent)
         with ThreadPoolExecutor(jobs) as pool:
             futures = [pool.submit(run_episode, client, by_num[n], anime_id, out_dir, width, args, progress)
                        for n in picked]

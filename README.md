@@ -29,13 +29,15 @@ Forked from [KevCui/animepahe-dl](https://github.com/KevCui/animepahe-dl) by Kev
      "ua": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/146.0.0.0 Safari/537.36",
      "browser": "chrome",
      "out_dir": "~/Videos/anime",
-     "jobs": 4
+     "jobs": 4,
+     "request_interval": 1
    }
    ```
 
    - `ua`: your browser's exact user agent (search "what is my user agent" in that browser). Cloudflare ties its cookie to it, so update it after browser updates.
    - `out_dir` (optional): where downloads go when `-o` is not given. Defaults to the current directory.
    - `jobs` (optional): how many episodes download at once when `-j` is not given. Defaults to 4.
+   - `request_interval` (optional): minimum seconds between page requests to animepahe, pahe.win and kwik, across all jobs. Defaults to 1, `0` turns it off. Bursts of page requests get your IP rate limited, and a heavily used IP can stay blocked for days. Video downloads are not slowed down by it.
    - `browser`: where to read cookies from, in yt-dlp's `BROWSER[+KEYRING][:PROFILE]` format. Defaults to `chrome`. Supported: `brave`, `chrome`, `chromium`, `edge`, `firefox`, `opera`, `safari`, `vivaldi`, `whale`. A Chromium fork not on that list works through its profile directory, for example `chromium:~/.config/ardia`.
 
 ## Usage

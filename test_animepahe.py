@@ -88,6 +88,7 @@ def test_rate_limit_backoff():
     def client(codes):
         c = object.__new__(animepahe.Client)
         c.gen, c.RATE_LIMIT_WAITS = 0, (5, 15)
+        c.request_interval, c.pace_lock, c.next_slot = 0.0, __import__('threading').Lock(), 0.0
         queue = list(codes)
         c._session = lambda: type('S', (), {'request': lambda self, *a, **k: queue.pop(0)})()
         return c, queue
@@ -147,6 +148,27 @@ def test_download_rejects_non_mp4():
         part.write_bytes(mp4[:50])                                                # resume: no header check
         client(206, [mp4[50:]], {'content-length': str(len(mp4) - 50)}).download('u', 'r', Path(d) / '02.mp4', progress)
         assert (Path(d) / '02.mp4').read_bytes() == mp4
+
+
+def test_request_pacing():
+    import threading, time
+    import animepahe
+    c = animepahe.Client.__new__(animepahe.Client)
+    c.request_interval, c.pace_lock, c.next_slot = 0.1, threading.Lock(), 0.0
+    stamps = []
+    t0 = time.monotonic()
+    workers = [threading.Thread(target=lambda: (c._pace(), stamps.append(time.monotonic() - t0))) for _ in range(5)]
+    for w in workers:
+        w.start()
+    for w in workers:
+        w.join()
+    stamps.sort()
+    gaps = [b - a for a, b in zip(stamps, stamps[1:])]
+    assert all(g >= 0.09 for g in gaps), gaps                 # 5 threads at once still go out ~0.1 s apart
+    assert stamps[0] < 0.05                                   # first request is not delayed
+    c.request_interval, c.next_slot = 0.0, 0.0
+    t1 = time.monotonic(); c._pace(); c._pace()
+    assert time.monotonic() - t1 < 0.05                       # 0 disables pacing
 
 
 if __name__ == '__main__':
